@@ -18,7 +18,7 @@ const DEFAULT_PATHS = ['*'];
 const DEFAULT_EXCLUDE = 'node_modules|jquery|underscore|mustache.js|require|order.js|text.js';
 // Table output configuration.
 const TABLE = {
-    HEADERS: ["Type", "Files", "Lines"],
+    HEADERS: ["Type", "Files", "Lines", "Median"],
     COLUMN_ALIGN: "left",
     // Markdown-style delimiters (see: https://www.markdownguide.org/extended-syntax/#tables)
     COLUMN_SEPARATOR: " | ",
@@ -112,19 +112,24 @@ async function collectCodeStats({ paths, types, exclude, useDefaultExclude }) {
     let totalLines = 0;
     const filesByType = {};
     const linesByType = {};
+    const allLinesByType = {};
     const filenames = findSourceFiles(paths, types, exclude, useDefaultExclude);
     for (const filename of filenames) {
         const { type, lines } = await collectSourceFileCodeStats(filename);
         totalLines += lines;
         filesByType[type] = (filesByType[type] || 0) + 1;
         linesByType[type] = (linesByType[type] || 0) + lines;
+        if (!allLinesByType[type])
+            allLinesByType[type] = [];
+        allLinesByType[type].push(lines);
     }
     const totalFiles = filenames.length;
     return {
         totalFiles,
         totalLines,
         filesByType,
-        linesByType
+        linesByType,
+        allLinesByType
     };
 }
 async function collectSourceFileCodeStats(filename) {
@@ -169,13 +174,15 @@ async function countLines(file) {
     });
     return promise;
 }
-function printResults({ linesByType, filesByType, totalLines, totalFiles }) {
+function printResults({ linesByType, filesByType, totalLines, totalFiles, allLinesByType }) {
     const sortedRows = Object
         .keys(linesByType)
         .map(type => ({
         type,
         files: filesByType[type],
-        lines: linesByType[type]
+        lines: linesByType[type],
+        mean: linesByType[type] / filesByType[type],
+        median: median(allLinesByType[type])
     }))
         .sort((a, b) => a.lines != b.lines
         ? a.lines - b.lines
@@ -185,14 +192,26 @@ function printResults({ linesByType, filesByType, totalLines, totalFiles }) {
         row.type,
         `${row.files}`,
         `${row.lines} (${formatPercent(row.lines / totalLines)})`,
+        `${Math.round(row.median)}`
     ]);
-    const summary = ["All", `${totalFiles}`, `${totalLines}`];
+    const summary = ["All", `${totalFiles}`, `${totalLines}`, `${Math.round(totalLines / totalFiles)}`];
     log("");
     printTable(TABLE.HEADERS, formattedRows, summary);
 }
 function formatPercent(fraction) {
     const n = fraction * 100;
     return `${n.toFixed(n >= 1 ? 0 : 1)}%`;
+}
+function median(numbers) {
+    if (numbers.length == 1)
+        return numbers[0];
+    if (numbers.length == 0)
+        return 0;
+    const sorted = [...numbers].sort();
+    const middle = sorted.length / 2;
+    return Number.isInteger(middle)
+        ? sorted[middle]
+        : (sorted[Math.floor(middle)] + sorted[Math.ceil(middle)]) / 2;
 }
 function printTable(headers, rows, footer) {
     const columnWidths = calculateColumnWidths([headers, ...rows, footer]);
